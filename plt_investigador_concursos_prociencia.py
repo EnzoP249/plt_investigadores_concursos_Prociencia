@@ -269,143 +269,75 @@ with pd.ExcelWriter(f'{a}.xlsx') as writer:
     #fusion4.to_excel(writer, sheet_name="3.PubClasificadasAfill", index=False)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ###############################################################################
-# Potencial estrategia en caso pueda usar el API de SCOPUS
+# AGREGAR INFORMACIÓN A UN CONJUNTO DE ARTÍCULOS CIENTÍFICOS
 ###############################################################################
 
-API_KEY = "7fe684a86517ef163c6e8acd82c787f7"
-
-BASE_URL = "https://api.elsevier.com/content/search/scopus"
-HEADERS = {"X-ELS-APIKey": API_KEY, "Accept": "application/json"}
-
-COUNT = 25            # 25 suele ir bien; sube/baja según tu cuota
-SLEEP = 0.25          # ajusta si te cae 429
-VIEW = "COMPLETE"     # trae más campos que STANDARD
-
-def fetch_author_pubs(author_id: str) -> list[dict]:
-    """Descarga todas las publicaciones de un autor (Scopus Author ID) usando cursor."""
-    rows = []
-    cursor = "*"
-    while True:
-        params = {
-            "query": f"AU-ID({author_id})",
-            "view": VIEW,
-            "count": COUNT,
-            "cursor": cursor,
-        }
-        r = requests.get(BASE_URL, headers=HEADERS, params=params, timeout=30)
-
-        # manejo simple de rate-limit
-        if r.status_code == 429:
-            time.sleep(2.5)
-            continue
-
-        r.raise_for_status()
-        data = r.json()
-        sr = data.get("search-results", {})
-        entries = sr.get("entry", []) or []
-        if not entries:
-            break
-
-        for e in entries:
-            # Campos típicos disponibles en Search (COMPLETE)
-            rows.append({
-                "author_id": author_id,
-                "eid": e.get("eid"),
-                "scopus_id": e.get("dc:identifier"),        # suele venir como "SCOPUS_ID:xxxx"
-                "doi": e.get("prism:doi"),
-                "title": e.get("dc:title"),
-                "creator": e.get("dc:creator"),
-                "publication_name": e.get("prism:publicationName"),
-                "cover_date": e.get("prism:coverDate"),
-                "aggregation_type": e.get("prism:aggregationType"),
-                "subtype": e.get("subtypeDescription"),
-                "citedby_count": e.get("citedby-count"),
-                "openaccess": e.get("openaccess"),
-                "authkeywords": e.get("authkeywords"),
-                # financiamiento (si tu entitlement lo devuelve en Search)
-                "fund_sponsor": e.get("fund-sponsor"),
-                "fund_no": e.get("fund-no"),
-                "fund_acr": e.get("fund-acr"),
-            })
-
-        # siguiente cursor (viene en link rel="next")
-        next_link = None
-        for lk in sr.get("link", []) or []:
-            if lk.get("@ref") == "next":
-                next_link = lk.get("@href")
-                break
-
-        if not next_link or "cursor=" not in next_link:
-            break
-
-        cursor = next_link.split("cursor=", 1)[1]
-        time.sleep(SLEEP)
-
-    return rows
+# Se utilizan la base de datos sobre publicaciones científicas indizadas en scopus
+pub_scopus = pd.read_csv("tbl_scopus_pub.csv", encoding = "utf-8", delimiter=",")
+pub_scopus.shape
+dir(pub_scopus)
+pub_scopus.columns
 
 
-# ==========
-# MAIN
-# ==========
-all_rows = []
-for i, aid in enumerate(caso, start=1):
-    print(f"[{i}/{len(caso)}] Descargando author_id={aid} ...")
-    all_rows.extend(fetch_author_pubs(str(aid).strip()))
+# Se crea un subset del dataframe pub_scopus
+pub_scopus1 = pub_scopus[["eid", "doi", "source_title", "title", "cover_date"]]
 
-df = pd.DataFrame(all_rows)
 
-# Un paper puede aparecer por múltiples autores: dedup por EID (si existe)
-if "eid" in df.columns:
-    df = df.drop_duplicates(subset=["eid"], keep="first")
+# Se utiliza una base datos sobre publicaciones científicas y sus autores
+autor_scopus = pd.read_csv("tbl_ws_api_scopus_detalle_afiliacion_publicaciones_renacyt.csv",
+                           encoding="utf-8", delimiter=",")
 
-df.to_csv("scopus_produccion_40_autores.csv", index=False, encoding="utf-8-sig")
-print(f"Listo ✅ Filas: {len(df)} | Archivo: scopus_produccion_40_autores.csv")
+autor_scopus.columns
+
+autor_scopus1 = autor_scopus[["eid", "doi", "auth_id", "auth_name", "af_id", "affil_name"]]
+
+
+# Se utiliza un archivo que contiene publicaciones científicas enviado por el Prociencia
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
