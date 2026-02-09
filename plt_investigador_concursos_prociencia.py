@@ -17,7 +17,7 @@ import re              # estándar
 import unicodedata
 import time
 import requests
-
+from rapidfuzz import process, fuzz
 
 # Se convierten los archivos en formato xlsx en objetos dataframes de pandas
 
@@ -279,6 +279,10 @@ pub_scopus.shape
 dir(pub_scopus)
 pub_scopus.columns
 
+# Se reformula el atributo cover_date del dataframe pub_scopus
+pub_scopus["cover_date"] = pd.to_datetime(pub_scopus["cover_date"])
+pub_scopus["cover_date"] = pub_scopus["cover_date"].dt.year
+
 
 # Se crea un subset del dataframe pub_scopus
 pub_scopus1 = pub_scopus[["eid", "doi", "source_title", "title", "cover_date"]]
@@ -290,21 +294,125 @@ autor_scopus = pd.read_csv("tbl_ws_api_scopus_detalle_afiliacion_publicaciones_r
 
 autor_scopus.columns
 
-autor_scopus1 = autor_scopus[["eid", "doi", "auth_id", "auth_name", "af_id", "affil_name"]]
+autor_scopus1 = autor_scopus[["eid", "auth_id", "auth_name", "af_id", "affil_name"]]
 
 
 # Se utiliza un archivo que contiene publicaciones científicas enviado por el Prociencia
+laboratorio = pd.read_excel("laboratorios_equipados.xlsx", sheet_name="Hoja2", header=0)
+laboratorio.columns
+
+# Se renombran algunos atributos del dataframe laboratorio
+laboratorio.rename(columns=({"TITULO DEL ARTICULO":"title"}), inplace=True)
+
+# Se identifica la cantidad de artículos científicos únicos
+laboratorio["title"].nunique()
+
+###############################################################################
+# Se utiliza una estrategia fuzzy matching
+###############################################################################
+
+def normalize_title(s):
+    if pd.isna(s):
+        return ""
+    s = str(s).lower().strip()
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"[^\w\s]", "", s)
+    return s
+
+def match_title(title_norm, choices, threshold=92):
+    if not title_norm or len(title_norm) < 10:
+        return (None, None)
+
+    res = process.extractOne(title_norm, choices, scorer=fuzz.token_set_ratio)
+    if res is None:
+        return (None, None)
+
+    m, score, _ = res
+    return (m, score) if score >= threshold else (None, score)
+
+# ============================
+# 1) Crear pub_scopus1_ready (con title_norm asegurado)
+# ============================
+pub_scopus1_ready = pub_scopus1.copy()
+
+pub_scopus1_ready = pub_scopus1_ready.dropna(subset=["title"]).copy()
+#pub_scopus1_ready["cover_date"] = pd.to_datetime(pub_scopus1_ready["cover_date"], errors="coerce")
+pub_scopus1_ready["title_norm"] = pub_scopus1_ready["title"].apply(normalize_title)
+
+# Evita duplicados de título en Scopus (para no duplicar filas de laboratorio al hacer merge)
+pub_scopus1_ready = (
+    pub_scopus1_ready.sort_values("cover_date", ascending=False)
+                     .drop_duplicates(subset=["title_norm"], keep="first")
+)
+
+# ============================
+# 2) Preparar laboratorio (con title_norm)
+# ============================
+laboratorio = laboratorio.copy()
+laboratorio["title_norm"] = laboratorio["title"].apply(normalize_title)
+
+# ============================
+# 3) Matching desde laboratorio → Scopus
+# ============================
+choices = pub_scopus1_ready["title_norm"].tolist()
+
+tmp = laboratorio["title_norm"].apply(lambda x: match_title(x, choices, threshold=92))
+laboratorio["title_match_norm"] = tmp.apply(lambda t: t[0])
+laboratorio["match_score"] = tmp.apply(lambda t: t[1])
+
+# ============================
+# 4) LEFT MERGE (laboratorio se mantiene completo)
+# ============================
+df_final = pd.merge(
+    laboratorio,
+    pub_scopus1_ready[["title_norm", "eid", "doi", "source_title", "title", "cover_date"]],
+    left_on="title_match_norm",
+    right_on="title_norm",
+    how="left",
+    suffixes=("_lab", "_scopus")
+)
+
+print("laboratorio:", laboratorio.shape)
+print("df_final:", df_final.shape)
+print("matches con eid:", df_final["eid"].notna().sum())
+
+# Se considera el dataframe df_final
+df_final.columns
+
+df_final = df_final[['NUMERO DE CONTRATO ', 'ENTIDAD EJECUTORA', 'TITULO DEL PROYECTO',
+       'AUTORES', 'REVISTA', 'DOI/ENLACE', 'ESTADO',
+       'eid', 'doi', 'source_title', 'title_scopus',
+       'cover_date']]
 
 
+# Se realiza una fusión considerando el dataframe df_final y autor_scopus1
+fusion3 = pd.merge(df_final, autor_scopus1, on="eid", how="left")
+fusion3.shape
+fusion3.columns
 
+# Se crea un dataframe que solo contenga los códigos eid del dataframe fusion3
+fusion3_eid = fusion3[["eid"]]
+fusion3_eid = fusion3_eid.drop_duplicates(subset=["eid"])
+fusion3_eid = fusion3_eid.dropna(subset=["eid"])
 
+# Se crea una listado de codigos eid
+fusion3_eid_list = fusion3_eid["eid"].tolist()
+print(fusion3_eid_list)
 
+# Ahora bien, usando estos códigos, se descarga el abstract de estas publicaciones científicas de forma
+# manual usando la plataforma web de scopus
+caso = pd.read_csv("caso_pub.csv", encoding ="utf-8", delimiter=",")
+caso.columns
 
+caso = caso[["EID", "Abstract", "Cited by", "Funding Details"]]
+caso.rename(columns=({"EID":"eid"}), inplace=True)
 
+# El dataframe caso contiene información sobre el abstract y las fuentes de financiamiento de las publicaciones
+# Este dataframe se fusiona con el dataframe fusion3
+fusion4 = pd.merge(fusion3, caso, on="eid", how="left")
 
-
-
-
+# El dataframe fusion4 se convierte en un archivo en formato xlsx
+fusion4.to_excel("jijiji.xlsx")
 
 
 
