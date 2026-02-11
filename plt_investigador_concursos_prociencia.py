@@ -74,6 +74,67 @@ ctvitae1 = ctvitae[["nombre_completo","Tipo_Documento","DNI", "Genero", "codigo_
                     "codigo_orcid", "codigo_renacyt", "pais_nacimiento", "Grado Académico Máximo Importado SUNEDU", "Areas|Sub Areas|Disciplinas"]]
 
 
+
+# Se considera también una base de datos de los ctvitae del año 2024
+vitae24 = pd.read_csv("tbl_consulta_cti_vitae.csv", encoding = "utf-8", delimiter=",")
+vitae24.columns
+
+# Del dataframe vitae24, se considera la columna fecha de nacimiento
+vitae24 = vitae24[["id_perfil_scopus", "fecha_nacimiento"]]
+
+# Se crea una columna referida a la fecha actual
+vitae24["fecha_actual"] = "2026-02-11"
+
+# 1️⃣ Función para corregir fechas con año de 2 dígitos (ej: 54-12-05 → 1954-12-05)
+def fix_2digit_year(s):
+    if pd.isna(s):
+        return s
+    s = str(s).strip()
+    
+    # Detecta formato YY-MM-DD
+    if len(s) == 8 and s[2] == "-" and s[5] == "-":
+        yy = int(s[:2])
+        # Regla: si YY <= 26 → 2000+, si no → 1900+
+        century = 2000 if yy <= 26 else 1900
+        return f"{century + yy}{s[2:]}"
+    
+    return s
+
+
+# 2️⃣ Aplicar corrección a fecha_nacimiento
+vitae24["fecha_nacimiento"] = vitae24["fecha_nacimiento"].apply(fix_2digit_year)
+
+# 3️⃣ Convertir a datetime (evita que el código se rompa)
+vitae24["fecha_nacimiento"] = pd.to_datetime(vitae24["fecha_nacimiento"], errors="coerce")
+vitae24["fecha_actual"] = pd.to_datetime(vitae24["fecha_actual"], errors="coerce")
+
+# 4️⃣ Calcular edad precisa
+vitae24["edad"] = (
+    vitae24["fecha_actual"].dt.year - vitae24["fecha_nacimiento"].dt.year
+    - (
+        (vitae24["fecha_actual"].dt.month < vitae24["fecha_nacimiento"].dt.month) |
+        (
+            (vitae24["fecha_actual"].dt.month == vitae24["fecha_nacimiento"].dt.month) &
+            (vitae24["fecha_actual"].dt.day < vitae24["fecha_nacimiento"].dt.day)
+        )
+    )
+)
+
+# 5️⃣ (Opcional) Revisar registros con fechas inválidas
+print("Fechas inválidas:", vitae24["fecha_nacimiento"].isna().sum())
+
+# Se renombra una columna del dataframe vitae24
+vitae24.rename(columns=({"id_perfil_scopus":"codigo_scopus"}), inplace=True)
+vitae24 = vitae24[["codigo_scopus", "edad"]]
+
+# Se eliminan los valores repetidos y nas
+vitae24 = vitae24.drop_duplicates(subset=["codigo_scopus"])
+vitae24 = vitae24.dropna(subset=["codigo_scopus"])
+
+
+
+
+
 # -----------------------------
 # 1) Normalización de nombres
 # -----------------------------
@@ -414,8 +475,25 @@ fusion4 = pd.merge(fusion3, caso, on="eid", how="left")
 # El dataframe fusion4 se convierte en un archivo en formato xlsx
 fusion4.to_excel("jijiji.xlsx")
 
+###############################################################################
+# AGREGAR EDAD AL DATAFRAME SOBRE INVESTIGADORES
+###############################################################################
+
+# Se construye una función que aborde la conversión de int en str para un procesamiento óptimizado
+def int_to_str(value):
+    return str(value)
 
 
+# Especifica el diccionario de conversión en el parámetro converters
+converters1 = {"codigo_scopus": int_to_str}
+
+# Se agrega el archivo
+data = pd.read_excel("BD_investigadores_producción_cientifica_arch.xlsx", sheet_name="Investigador", header=0, converters=converters1)
+
+# Se fusiona el dataframe data con vitae24
+caso24 = pd.merge(data, vitae24, on="codigo_scopus", how="left")
+
+caso24.to_excel("caso_enviado.xlsx")
 
 
 
